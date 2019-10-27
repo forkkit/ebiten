@@ -413,10 +413,15 @@ func (i *Image) appendDrawTrianglesHistory(image *Image, vertices []float32, ind
 	}
 	// All images must be resolved and not stale each after frame.
 	// So we don't have to care if image is stale or not here.
+
+	vs := make([]float32, len(vertices))
+	copy(vs, vertices)
+	is := make([]uint16, len(indices))
+	copy(is, indices)
 	item := &drawTrianglesHistoryItem{
 		image:    image,
-		vertices: vertices,
-		indices:  indices,
+		vertices: vs,
+		indices:  is,
 		colorm:   colorm,
 		mode:     mode,
 		filter:   filter,

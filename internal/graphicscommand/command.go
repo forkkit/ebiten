@@ -98,8 +98,11 @@ func (q *commandQueue) appendVertices(vertices []float32, width, height float32)
 		q.srcSizes = append(q.srcSizes, make([]size, n/graphics.VertexFloatNum)...)
 	}
 	copy(q.vertices[q.nvertices:], vertices)
-	for i := 0; i < len(vertices)/graphics.VertexFloatNum; i++ {
-		idx := q.nvertices/graphics.VertexFloatNum + i
+
+	n := len(vertices) / graphics.VertexFloatNum
+	base := q.nvertices / graphics.VertexFloatNum
+	for i := 0; i < n; i++ {
+		idx := base + i
 		q.srcSizes[idx].width = width
 		q.srcSizes[idx].height = height
 	}
@@ -155,7 +158,8 @@ func (q *commandQueue) EnqueueDrawTrianglesCommand(dst, src *Image, vertices []f
 	}
 
 	n := len(vertices) / graphics.VertexFloatNum
-	q.appendVertices(vertices, float32(graphics.InternalImageSize(src.width)), float32(graphics.InternalImageSize(src.height)))
+	iw, ih := src.InternalSize()
+	q.appendVertices(vertices, float32(iw), float32(ih))
 	q.appendIndices(indices, uint16(q.nextIndex))
 	q.nextIndex += n
 	q.tmpNumIndices += len(indices)
@@ -192,7 +196,8 @@ func (q *commandQueue) Flush() {
 		const dstAdjustmentFactor = 1.0 / 256.0
 		const texelAdjustmentFactor = 1.0 / 512.0
 
-		for i := 0; i < q.nvertices/graphics.VertexFloatNum; i++ {
+		n := q.nvertices / graphics.VertexFloatNum
+		for i := 0; i < n; i++ {
 			s := q.srcSizes[i]
 
 			// Convert pixels to texels.
@@ -225,14 +230,28 @@ func (q *commandQueue) Flush() {
 			vs[i*graphics.VertexFloatNum+6] -= 1.0 / s.width * texelAdjustmentFactor
 			vs[i*graphics.VertexFloatNum+7] -= 1.0 / s.height * texelAdjustmentFactor
 		}
+	} else {
+		n := q.nvertices / graphics.VertexFloatNum
+		for i := 0; i < n; i++ {
+			s := q.srcSizes[i]
+
+			// Convert pixels to texels.
+			vs[i*graphics.VertexFloatNum+2] /= s.width
+			vs[i*graphics.VertexFloatNum+3] /= s.height
+			vs[i*graphics.VertexFloatNum+4] /= s.width
+			vs[i*graphics.VertexFloatNum+5] /= s.height
+			vs[i*graphics.VertexFloatNum+6] /= s.width
+			vs[i*graphics.VertexFloatNum+7] /= s.height
+		}
 	}
 
 	theGraphicsDriver.Begin()
-	for len(q.commands) > 0 {
+	cs := q.commands
+	for len(cs) > 0 {
 		nv := 0
 		ne := 0
 		nc := 0
-		for _, c := range q.commands {
+		for _, c := range cs {
 			if c.NumIndices() > graphics.IndicesNum {
 				panic(fmt.Sprintf("graphicscommand: c.NumIndices() must be <= graphics.IndicesNum but not at Flush: c.NumIndices(): %d, graphics.IndicesNum: %d", c.NumIndices(), graphics.IndicesNum))
 			}
@@ -249,7 +268,7 @@ func (q *commandQueue) Flush() {
 			vs = vs[nv:]
 		}
 		indexOffset := 0
-		for _, c := range q.commands[:nc] {
+		for _, c := range cs[:nc] {
 			if err := c.Exec(indexOffset); err != nil {
 				q.err = err
 				return
@@ -266,10 +285,10 @@ func (q *commandQueue) Flush() {
 			// Call glFlush to prevent black flicking (especially on Android (#226) and iOS).
 			theGraphicsDriver.Flush()
 		}
-		q.commands = q.commands[nc:]
+		cs = cs[nc:]
 	}
 	theGraphicsDriver.End()
-	q.commands = nil
+	q.commands = q.commands[:0]
 	q.nvertices = 0
 	q.nindices = 0
 	q.tmpNumIndices = 0

@@ -17,22 +17,12 @@
 
 package ebitenmobileview
 
-import (
-	"github.com/hajimehoshi/ebiten"
-)
-
 func update() error {
 	return nil
 }
 
-func start(f func(*ebiten.Image) error, width, height int, scale float64) {
+func UpdateTouchesOnAndroid(action int, id int, x, y int) {
 }
 
-func setScreenSize(width, height int, scale float64) {
-}
-
-func updateTouchesOnAndroid(action int, id int, x, y int) {
-}
-
-func updateTouchesOnIOSImpl(phase int, ptr int64, x, y int) {
+func UpdateTouchesOnIOS(phase int, ptr int64, x, y int) {
 }

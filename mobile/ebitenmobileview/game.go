@@ -32,7 +32,9 @@ type game interface {
 type state struct {
 	game game
 
-	running bool
+	delayedLayout func()
+
+	errorCh <-chan error
 
 	// m is a mutex required for each function.
 	// For example, on Android, Update can be called from a different thread:
@@ -45,4 +47,13 @@ func SetGame(game game) {
 	defer theState.m.Unlock()
 
 	theState.game = game
+
+	if theState.delayedLayout != nil {
+		theState.delayedLayout()
+		theState.delayedLayout = nil
+	}
+}
+
+func (s *state) isRunning() bool {
+	return s.errorCh != nil
 }

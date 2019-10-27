@@ -18,47 +18,27 @@ import (
 	"sync"
 )
 
-type command struct {
-	f func()
-}
-
 var (
-	delayedCommandsFlushable bool
+	needsToDelayCommands = true
 
 	// delayedCommands represents a queue for image operations that are ordered before the game starts
 	// (BeginFrame). Before the game starts, the package shareable doesn't determine the minimum/maximum texture
 	// sizes (#879).
-	//
-	// TODO: Flush the commands only when necessary (#921).
-	delayedCommands  []*command
+	delayedCommands  []func()
 	delayedCommandsM sync.Mutex
 )
 
-func makeDelayedCommandFlushable() {
-	delayedCommandsM.Lock()
-	delayedCommandsFlushable = true
-	delayedCommandsM.Unlock()
-}
-
-func enqueueDelayedCommand(f func()) {
-	delayedCommandsM.Lock()
-	delayedCommands = append(delayedCommands, &command{
-		f: f,
-	})
-	delayedCommandsM.Unlock()
-}
-
-func flushDelayedCommands() bool {
+func flushDelayedCommands() {
 	delayedCommandsM.Lock()
 	defer delayedCommandsM.Unlock()
 
-	if !delayedCommandsFlushable {
-		return false
+	if !needsToDelayCommands {
+		return
 	}
 
 	for _, c := range delayedCommands {
-		c.f()
+		c()
 	}
-	delayedCommands = nil
-	return true
+	delayedCommands = delayedCommands[:0]
+	needsToDelayCommands = false
 }

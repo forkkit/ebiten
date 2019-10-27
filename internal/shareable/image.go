@@ -281,7 +281,7 @@ func (i *Image) region() (x, y, width, height int) {
 //   11: Color Y
 func (i *Image) DrawTriangles(img *Image, vertices []float32, indices []uint16, colorm *affine.ColorM, mode driver.CompositeMode, filter driver.Filter, address driver.Address) {
 	backendsM.Lock()
-	defer backendsM.Unlock()
+	// Do not use defer for performance.
 
 	if img.disposed {
 		panic("shareable: the drawing source image must not be disposed (DrawTriangles)")
@@ -303,7 +303,8 @@ func (i *Image) DrawTriangles(img *Image, vertices []float32, indices []uint16, 
 
 	ox, oy, _, _ := img.region()
 	oxf, oyf := float32(ox), float32(oy)
-	for i := 0; i < len(vertices)/graphics.VertexFloatNum; i++ {
+	n := len(vertices) / graphics.VertexFloatNum
+	for i := 0; i < n; i++ {
 		vertices[i*graphics.VertexFloatNum+2] += oxf
 		vertices[i*graphics.VertexFloatNum+3] += oyf
 		vertices[i*graphics.VertexFloatNum+4] += oxf
@@ -320,6 +321,8 @@ func (i *Image) DrawTriangles(img *Image, vertices []float32, indices []uint16, 
 	if !img.isShared() && img.shareable() {
 		imagesToMakeShared[img] = struct{}{}
 	}
+
+	backendsM.Unlock()
 }
 
 func (i *Image) Fill(clr color.RGBA) {
@@ -385,8 +388,9 @@ func (i *Image) replacePixels(p []byte) {
 
 func (i *Image) At(x, y int) (byte, byte, byte, byte) {
 	backendsM.Lock()
-	defer backendsM.Unlock()
-	return i.at(x, y)
+	r, g, b, a := i.at(x, y)
+	backendsM.Unlock()
+	return r, g, b, a
 }
 
 func (i *Image) at(x, y int) (byte, byte, byte, byte) {

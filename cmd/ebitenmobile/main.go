@@ -109,6 +109,13 @@ func main() {
 
 	flagset.Parse(args[1:])
 
+	// Add ldflags to suppress linker errors (#932).
+	// See https://github.com/golang/go/issues/17807
+	if buildLdflags == "" {
+		buildLdflags += " "
+	}
+	buildLdflags += "-extldflags=-Wl,-soname,libgojni.so"
+
 	if err := prepareGomobileCommands(); err != nil {
 		log.Fatal(err)
 	}
@@ -124,7 +131,21 @@ func main() {
 }
 
 func doBind(args []string, flagset *flag.FlagSet) error {
-	pkgs, err := packages.Load(nil, flagset.Args()[0])
+	tags := buildTags
+	cfg := &packages.Config{}
+	switch buildTarget {
+	case "android":
+		cfg.Env = append(os.Environ(), "GOOS=android")
+	case "ios":
+		cfg.Env = append(os.Environ(), "GOOS=darwin")
+		if tags != "" {
+			tags += " "
+		}
+		tags += "ios"
+	}
+	cfg.BuildFlags = []string{"-tags", tags}
+
+	pkgs, err := packages.Load(cfg, flagset.Args()[0])
 	if err != nil {
 		return err
 	}

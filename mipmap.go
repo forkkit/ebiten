@@ -77,6 +77,10 @@ func (m *mipmap) at(x, y int) (r, g, b, a byte) {
 	return m.orig.At(x, y)
 }
 
+func (m *mipmap) set(x, y int, r, g, b, a byte) {
+	m.orig.Set(x, y, r, g, b, a)
+}
+
 func (m *mipmap) drawImage(src *mipmap, bounds image.Rectangle, geom *GeoM, colorm *affine.ColorM, mode driver.CompositeMode, filter driver.Filter) {
 	if det := geom.det(); det == 0 {
 		return
@@ -121,9 +125,14 @@ func (m *mipmap) drawImage(src *mipmap, bounds image.Rectangle, geom *GeoM, colo
 		colorm = nil
 	}
 
+	screen := filter == driver.FilterScreen
+	if screen && level != 0 {
+		panic("ebiten: Mipmap must not be used when the filter is FilterScreen")
+	}
+
 	a, b, c, d, tx, ty := geom.elements()
 	if level == 0 {
-		vs := quadVertices(bounds.Min.X, bounds.Min.Y, bounds.Max.X, bounds.Max.Y, a, b, c, d, tx, ty, cr, cg, cb, ca)
+		vs := quadVertices(bounds.Min.X, bounds.Min.Y, bounds.Max.X, bounds.Max.Y, a, b, c, d, tx, ty, cr, cg, cb, ca, screen)
 		is := graphics.QuadIndices()
 		m.orig.DrawTriangles(src.orig, vs, is, colorm, mode, filter, driver.AddressClampToZero)
 	} else if buf := src.level(bounds, level); buf != nil {
@@ -133,7 +142,7 @@ func (m *mipmap) drawImage(src *mipmap, bounds image.Rectangle, geom *GeoM, colo
 		b *= s
 		c *= s
 		d *= s
-		vs := quadVertices(0, 0, w, h, a, b, c, d, tx, ty, cr, cg, cb, ca)
+		vs := quadVertices(0, 0, w, h, a, b, c, d, tx, ty, cr, cg, cb, ca, false)
 		is := graphics.QuadIndices()
 		m.orig.DrawTriangles(buf, vs, is, colorm, mode, filter, driver.AddressClampToZero)
 	}
@@ -149,7 +158,7 @@ func (m *mipmap) drawTriangles(src *mipmap, bounds image.Rectangle, vertices []V
 	// TODO: Needs boundary check optimization?
 	// See https://go101.org/article/bounds-check-elimination.html
 
-	vs := vertexSlice(len(vertices))
+	vs := vertexSlice(len(vertices), false)
 	for i, v := range vertices {
 		vs[i*graphics.VertexFloatNum] = v.DstX
 		vs[i*graphics.VertexFloatNum+1] = v.DstY
@@ -194,7 +203,7 @@ func (m *mipmap) level(r image.Rectangle, level int) *buffered.Image {
 	switch {
 	case level == 1:
 		src = m.orig
-		vs = quadVertices(r.Min.X, r.Min.Y, r.Max.X, r.Max.Y, 0.5, 0, 0, 0.5, 0, 0, 1, 1, 1, 1)
+		vs = quadVertices(r.Min.X, r.Min.Y, r.Max.X, r.Max.Y, 0.5, 0, 0, 0.5, 0, 0, 1, 1, 1, 1, false)
 		filter = driver.FilterLinear
 	case level > 1:
 		src = m.level(r, level-1)
@@ -203,11 +212,11 @@ func (m *mipmap) level(r image.Rectangle, level int) *buffered.Image {
 			return nil
 		}
 		w, h := sizeForLevel(r.Dx(), r.Dy(), level-1)
-		vs = quadVertices(0, 0, w, h, 0.5, 0, 0, 0.5, 0, 0, 1, 1, 1, 1)
+		vs = quadVertices(0, 0, w, h, 0.5, 0, 0, 0.5, 0, 0, 1, 1, 1, 1, false)
 		filter = driver.FilterLinear
 	case level == -1:
 		src = m.orig
-		vs = quadVertices(r.Min.X, r.Min.Y, r.Max.X, r.Max.Y, 2, 0, 0, 2, 0, 0, 1, 1, 1, 1)
+		vs = quadVertices(r.Min.X, r.Min.Y, r.Max.X, r.Max.Y, 2, 0, 0, 2, 0, 0, 1, 1, 1, 1, false)
 		filter = driver.FilterNearest
 	case level < -1:
 		src = m.level(r, level+1)
@@ -216,7 +225,7 @@ func (m *mipmap) level(r image.Rectangle, level int) *buffered.Image {
 			return nil
 		}
 		w, h := sizeForLevel(r.Dx(), r.Dy(), level+1)
-		vs = quadVertices(0, 0, w, h, 2, 0, 0, 2, 0, 0, 1, 1, 1, 1)
+		vs = quadVertices(0, 0, w, h, 2, 0, 0, 2, 0, 0, 1, 1, 1, 1, false)
 		filter = driver.FilterNearest
 	default:
 		panic(fmt.Sprintf("ebiten: invalid level: %d", level))
@@ -292,6 +301,10 @@ func (m *mipmap) mipmapLevel(geom *GeoM, width, height int, filter driver.Filter
 		panic("ebiten: dst must be non zero at mipmapLevel")
 	}
 
+	if filter == driver.FilterScreen {
+		return 0
+	}
+
 	// Use 'negative' mipmap to render edges correctly (#611, #907).
 	// It looks like 128 is the enlargement factor that causes edge missings to pass the test TestImageStretch.
 	const tooBigScale = 128
@@ -363,22 +376,30 @@ func pow2(power int) float32 {
 	return x
 }
 
-func maxf32(values ...float32) float32 {
-	max := float32(math.Inf(-1))
-	for _, v := range values {
-		if max < v {
-			max = v
-		}
+func maxf32(a, b, c, d float32) float32 {
+	max := a
+	if max < b {
+		max = b
+	}
+	if max < c {
+		max = c
+	}
+	if max < d {
+		max = d
 	}
 	return max
 }
 
-func minf32(values ...float32) float32 {
-	min := float32(math.Inf(1))
-	for _, v := range values {
-		if min > v {
-			min = v
-		}
+func minf32(a, b, c, d float32) float32 {
+	min := a
+	if min > b {
+		min = b
+	}
+	if min > c {
+		min = c
+	}
+	if min > d {
+		min = d
 	}
 	return min
 }

@@ -21,6 +21,8 @@ package ebitenmobileview
 import (
 	"math"
 	"runtime"
+
+	"github.com/hajimehoshi/ebiten"
 )
 
 type ViewRectSetter interface {
@@ -30,9 +32,16 @@ type ViewRectSetter interface {
 func Layout(viewWidth, viewHeight int, viewRectSetter ViewRectSetter) {
 	theState.m.Lock()
 	defer theState.m.Unlock()
+	layout(viewWidth, viewHeight, viewRectSetter)
+}
 
+func layout(viewWidth, viewHeight int, viewRectSetter ViewRectSetter) {
 	if theState.game == nil {
-		panic("ebitenmobileview: SetGame must be called before ebitenLayout")
+		// It is fine to override the existing function since only the last layout result matters.
+		theState.delayedLayout = func() {
+			layout(viewWidth, viewHeight, viewRectSetter)
+		}
+		return
 	}
 
 	w, h := theState.game.Layout(int(viewWidth), int(viewHeight))
@@ -40,16 +49,19 @@ func Layout(viewWidth, viewHeight int, viewRectSetter ViewRectSetter) {
 	scaleY := float64(viewHeight) / float64(h)
 	scale := math.Min(scaleX, scaleY)
 
-	width := int(math.Ceil(float64(w) * scale))
-	height := int(math.Ceil(float64(h) * scale))
+	// To convert a logical offscreen size to the actual screen size, use Math.floor to use smaller and safer
+	// values, or glitches can appear (#956).
+	width := int(math.Floor(float64(w) * scale))
+	height := int(math.Floor(float64(h) * scale))
 	x := (viewWidth - width) / 2
 	y := (viewHeight - height) / 2
 
-	if !theState.running {
-		start(theState.game.Update, w, h, scale)
-		theState.running = true
+	if theState.isRunning() {
+		ebiten.SetScreenSize(w, h)
+		ebiten.SetScreenScale(scale)
 	} else {
-		setScreenSize(w, h, scale)
+		// The last argument 'title' is not used on mobile platforms, so just pass an empty string.
+		theState.errorCh = ebiten.RunWithoutMainLoop(theState.game.Update, w, h, scale, "")
 	}
 
 	if viewRectSetter != nil {
@@ -65,12 +77,4 @@ func Update() error {
 	defer theState.m.Unlock()
 
 	return update()
-}
-
-func UpdateTouchesOnAndroid(action int, id int, x, y int) {
-	updateTouchesOnAndroid(action, id, x, y)
-}
-
-func UpdateTouchesOnIOS(phase int, ptr int64, x, y int) {
-	updateTouchesOnIOSImpl(phase, ptr, x, y)
 }
